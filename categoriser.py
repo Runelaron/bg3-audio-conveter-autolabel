@@ -1,191 +1,179 @@
-import shutil
+"""BG3 audio asset tools: Convert, decode, group, and rename Wwise files."""
+
+from __future__ import annotations
+
 import os
-import glob
 import re
+import shutil
 import subprocess
+import sys
+from pathlib import Path
+from typing import Iterable
 
-should_convert = True
-should_decode_banks = True
-should_group = True
-# Only set this if the additional steps in the README have been completed
-should_rename = False
+WWISER_PY = Path("/home/rune/code/bg3/wwiser/wwiser.py")
+VGMSTREAM_DIR = Path("/home/rune/code/bg3/vgmstream")
+UNPACKED_DATA = Path("/home/rune/code/bg3/sounds/UnpackedData")
+AUDIO_CONVERTED = Path("/home/rune/code/bg3/sounds/converted")
+SIDS_WIKI = Path("/home/rune/code/bg3/bg3-sids.wiki")
 
-# Make sure to escape backslahes! (i.e. replace `\` with `\\`)
-wwiser_pyz = ""
-folder_vgmstream = ""
-folder_unpacked_data = ""
-folder_audio_converted = ""
-# Only required if should_rename is True
-folder_bg3sids_wiki = ""
-
-
-def convert_wem_folder(source_dir: str, dest_dir: str):
-    cwd = os.getcwd()
-    os.chdir(folder_vgmstream)
-
-    wems = glob.glob(f"{source_dir}\\*.wem")
-    total = len(wems)
-    wem_index = 0
-    print(f"\r  {wem_index}/{total}", end="", flush=True)
-    for wem in wems:
-        _, filename = os.path.split(wem)
-        subprocess.call(
-            f"vgmstream-cli -o {dest_dir}\\{filename}.wav {source_dir}\\{filename}",
-            shell=True,
-            stdout=subprocess.DEVNULL,
-        )
-        wem_index = wem_index + 1
-        print(f"\r  {wem_index}/{total}", end="", flush=True)
-
-    print(f"\r  {wem_index}/{total}")
-    os.chdir(cwd)
+SHOULD_CONVERT = True
+SHOULD_DECODE_BANKS = True
+SHOULD_GROUP = True
+SHOULD_RENAME = True
 
 
-def decode_banks(source_dir: str):
-    banks = glob.glob(f"{source_dir}\\*.bnk")
-    total = len(banks)
-    bank_index = 0
-    print(f"\r  {bank_index}/{total}", end="", flush=True)
-    for bank in banks:
-        subprocess.call(
-            f"python {wwiser_pyz} -d xsl {bank}",
-            shell=True,
+def progress(items: Iterable[Path]) -> Iterable[tuple[int, int, Path]]:
+    """Yield (idx, total, item) and print a progress counter."""
+    items = list(items)
+    total = len(items)
+    for idx, item in enumerate(items, 1):
+        print(f"\r  {idx}/{total}", end="", flush=True)
+        yield idx, total, item
+    print()
+
+
+def vgmstream_exe() -> Path:
+    """Return path to vgmstream-cli, ensuring it is executable."""
+    exe_name = "vgmstream-cli.exe" if os.name == "nt" else "vgmstream-cli"
+    exe = VGMSTREAM_DIR / exe_name
+    if not exe.exists():
+        raise FileNotFoundError(f"{exe} not found. Build or install vgmstream.")
+    if os.name != "nt" and not os.access(exe, os.X_OK):
+        try:
+            exe.chmod(exe.stat().st_mode | 0o111)
+        except PermissionError as err:
+            raise PermissionError(
+                f"{exe} exists but is not executable. "
+                "Run `chmod +x` or move it off NTFS."
+            ) from err
+    return exe
+
+
+def convert_wem_folder(src: Path, dst: Path) -> None:
+    """Convert all *.wem files in src to WAV files in dst."""
+    cli = vgmstream_exe()
+    for _, _, wem in progress(src.glob("*.wem")):
+        out_file = dst / f"{wem.name}.wav"
+        subprocess.run(
+            [cli, "-o", out_file, wem],
+            check=True,
+            cwd=VGMSTREAM_DIR,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        bank_index = bank_index + 1
-        print(f"\r  {bank_index}/{total}", end="", flush=True)
-    print(f"\r  {bank_index}/{total}")
 
 
-def create_banks_folders(banks_dir: str, sounds_dir: str):
-    banks_xmls = glob.glob(f"{banks_dir}\\*.bnk.xml")
-    total = len(banks_xmls)
-    bank_folder_index = 0
-    print(f"\r  {bank_folder_index}/{total}", end="", flush=True)
-    for bank_filename in banks_xmls:
-        bank_folder = os.path.basename(bank_filename).split(".")[0]
-        if not os.path.exists(f"{sounds_dir}\\{bank_folder}"):
-            os.makedirs(f"{sounds_dir}\\{bank_folder}")
-        with open(bank_filename, "r") as bank_file_content:
-            for line in bank_file_content:
-                if 'name="sourceID"' in line:
-                    ids = line.split('"')[-2]
-                    filename = f"{ids}.wem.wav"
-                    if filename in os.listdir(sounds_dir):
-                        shutil.move(
-                            f"{sounds_dir}\\{filename}",
-                            f"{sounds_dir}\\{bank_folder}\\{filename}",
-                        )
-        bank_folder_index = bank_folder_index + 1
-        print(f"\r  {bank_folder_index}/{total}", end="", flush=True)
-    print(f"\r  {bank_folder_index}/{total}")
-
-
-def rename_files(source: str):
-    folders = glob.glob(f"{source}/*/")
-    total = len(folders)
-    rename_folder_index = 0
-    print(f"\r  {rename_folder_index}/{total}", end="", flush=True)
-
-    markdown_files = glob.glob(f"{folder_bg3sids_wiki}\\*.bnk.md")
-
-    for folder_path in folders:
-        folder_name = os.path.basename(os.path.normpath(folder_path))
-
-        markdown_file = None
-        for file_name in markdown_files:
-            if f"{folder_name}-" in file_name or f"{folder_name}.bnk.md" in file_name:
-                markdown_file = file_name
-                break
-
-        if markdown_file is None:
-            print(f"\r  No mappings found for {folder_name}")
-            continue
-
-        # The bank in the Ambience pack has nicer names than Amb, so use that.
-        # I don't know of any other duplicated IDs, but they may exist.
-        if "Amb_[PAK]_Amb_Ps_Specific-_-AMB_PS_SPECIFIC.bnk.md" in markdown_file:
-            markdown_file = f"{folder_bg3sids_wiki}\\Ambience_[PAK]_Amb_Ps_Specific-_-AMB_PS_SPECIFIC.bnk.md"
-
-        id_dict = {}
-        with open(markdown_file, "r") as markdown_file_content:
-            for line in markdown_file_content:
-                line_match = re.match(r"^\| \d+ \| (\w+) \| (.*) \|$", line)
-                if line_match is not None:
-                    base_name = line_match.group(1)
-                    ids = line_match.group(2).split(", ")
-                    for sound_match_index in range(len(ids)):
-                        id = ids[sound_match_index]
-                        id_dict[id] = f"{base_name}_{sound_match_index}"
-
-        # For files in dir, rename by looking up id
-        # if no id, do nothing
-        sounds = glob.glob(f"{folder_path}\\*.wem.wav")
-        for sound in sounds:
-            sound_id = os.path.basename(sound).split(".")[0]
-            if sound_id in id_dict:
-                os.rename(sound, os.path.join(folder_path, f"{id_dict[sound_id]}.wav"))
-
-        rename_folder_index = rename_folder_index + 1
-        print(
-            f"\r  {rename_folder_index}/{total}",
-            end="",
-            flush=True,
+def decode_banks(src: Path) -> None:
+    """Run wwiser.py on each *.bnk in src to produce XML metadata."""
+    for _, _, bank in progress(src.glob("*.bnk")):
+        subprocess.run(
+            [sys.executable, WWISER_PY, "-d", "xsl", bank],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
-    print(f"\r  {rename_folder_index}/{total}")
 
 
-src_sound = os.path.join(
-    folder_unpacked_data, "SharedSounds\\Public\\Shared\\Assets\\Sound"
-)
-src_sound_dev = os.path.join(
-    folder_unpacked_data, "SharedSounds\\Public\\SharedDev\\Assets\\Sound"
-)
-src_banks = os.path.join(
-    folder_unpacked_data, "SharedSoundBanks\\Public\\Shared\\Assets\\Sound"
-)
-src_banks_dev = os.path.join(
-    folder_unpacked_data, "SharedSoundBanks\\Public\\SharedDev\\Assets\\Sound"
-)
-
-dest_sound = os.path.join(folder_audio_converted, "Shared")
-dest_sound_dev = os.path.join(folder_audio_converted, "SharedDev")
+def create_banks_folders(banks_dir: Path, sounds_dir: Path) -> None:
+    """Move WAVs into subfolders named after their parent bank."""
+    for _, _, xml in progress(banks_dir.glob("*.bnk.xml")):
+        bank_folder = sounds_dir / xml.stem
+        bank_folder.mkdir(exist_ok=True)
+        with xml.open() as fh:
+            for line in fh:
+                if 'name="sourceID"' not in line:
+                    continue
+                sound_id = line.split('"')[-2]
+                src = sounds_dir / f"{sound_id}.wem.wav"
+                if src.exists():
+                    shutil.move(src, bank_folder / src.name)
 
 
-os.makedirs(src_sound, exist_ok=True)
-os.makedirs(src_sound_dev, exist_ok=True)
-os.makedirs(src_banks, exist_ok=True)
-os.makedirs(src_banks_dev, exist_ok=True)
-os.makedirs(dest_sound, exist_ok=True)
-os.makedirs(dest_sound_dev, exist_ok=True)
+def sid_mapping(markdown: Path) -> dict[str, str]:
+    """Return {sound_id: new_name} mapping from a SID wiki markdown file."""
+    mapping: dict[str, str] = {}
+    with markdown.open() as fh:
+        for line in fh:
+            m = re.match(r"^\| \d+ \| (\w+) \| (.*) \|$", line)
+            if not m:
+                continue
+            base = m.group(1)
+            for idx, sid in enumerate(m.group(2).split(", ")):
+                mapping[sid] = f"{base}_{idx}"
+    return mapping
 
-if should_convert:
-    print("Converting sound files")
-    print("  Shared")
-    convert_wem_folder(src_sound, dest_sound)
-    print("  SharedDev")
-    convert_wem_folder(src_sound_dev, dest_sound_dev)
 
-if should_decode_banks:
-    print("Decoding sound banks")
-    print("  Shared")
-    decode_banks(src_banks)
-    print("  SharedDev")
-    decode_banks(src_banks_dev)
+def rename_files(root: Path) -> None:
+    """Rename *.wem.wav files using human-friendly names from SID wiki."""
+    md_files = list(SIDS_WIKI.glob("*.bnk.md"))
+    for _, _, folder in progress(p for p in root.iterdir() if p.is_dir()):
+        md = next(
+            (
+                m for m in md_files
+                if f"{folder.name}-" in m.name or f"{folder.name}.bnk.md" in m.name
+            ),
+            None,
+        )
+        if md is None:
+            print(f"  ✗ No mappings for {folder.name}")
+            continue
+        # Special-case file fix from original script
+        if md.name == "Amb_[PAK]_Amb_Ps_Specific-_-AMB_PS_SPECIFIC.bnk.md":
+            md = SIDS_WIKI / "Ambience_[PAK]_Amb_Ps_Specific-_-AMB_PS_SPECIFIC.bnk.md"
+        id_map = sid_mapping(md)
+        for sound in folder.glob("*.wem.wav"):
+            sid = sound.stem.split(".")[0]
+            if sid in id_map:
+                sound.rename(folder / f"{id_map[sid]}.wav")
 
-if should_group:
-    print("Grouping files by bank")
-    print("  Shared")
-    create_banks_folders(src_banks, dest_sound)
-    print("  SharedDev")
-    create_banks_folders(src_banks_dev, dest_sound_dev)
 
-if should_rename:
-    print("Renaming files")
-    print("  Shared")
-    rename_files(dest_sound)
-    print("  SharedDev")
-    rename_files(dest_sound_dev)
+def ensure_dirs(*paths: Path) -> None:
+    """Create each directory (with parents) if it does not exist."""
+    for path in paths:
+        path.mkdir(parents=True, exist_ok=True)
 
-print("Done")
+
+def main() -> None:
+    """Run the asset conversion pipeline."""
+    src_sound = UNPACKED_DATA / "SharedSounds" / "Public" / "Shared" / "Assets" / "Sound"
+    src_sound_dev = UNPACKED_DATA / "SharedSounds" / "Public" / "SharedDev" / "Assets" / "Sound"
+    src_banks = UNPACKED_DATA / "SharedSoundBanks" / "Public" / "Shared" / "Assets" / "Sound"
+    src_banks_dev = UNPACKED_DATA / "SharedSoundBanks" / "Public" / "SharedDev" / "Assets" / "Sound"
+
+    dst_sound = AUDIO_CONVERTED / "Shared"
+    dst_sound_dev = AUDIO_CONVERTED / "SharedDev"
+
+    ensure_dirs(
+        src_sound, src_sound_dev, src_banks, src_banks_dev,
+        dst_sound, dst_sound_dev,
+    )
+
+    if SHOULD_CONVERT:
+        print("Converting sound files\n  Shared")
+        convert_wem_folder(src_sound, dst_sound)
+        print("  SharedDev")
+        convert_wem_folder(src_sound_dev, dst_sound_dev)
+
+    if SHOULD_DECODE_BANKS:
+        print("Decoding sound banks\n  Shared")
+        decode_banks(src_banks)
+        print("  SharedDev")
+        decode_banks(src_banks_dev)
+
+    if SHOULD_GROUP:
+        print("Grouping files by bank\n  Shared")
+        create_banks_folders(src_banks, dst_sound)
+        print("  SharedDev")
+        create_banks_folders(src_banks_dev, dst_sound_dev)
+
+    if SHOULD_RENAME:
+        print("Renaming files\n  Shared")
+        rename_files(dst_sound)
+        print("  SharedDev")
+        rename_files(dst_sound_dev)
+
+    print("Done")
+
+
+if __name__ == "__main__":
+    main()
