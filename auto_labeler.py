@@ -1,4 +1,4 @@
-"""Utilities to organise BG3 WEM files by SID-wiki tables."""
+"""Organise WAV files into SID-wiki-based folder structures."""
 
 from __future__ import annotations
 
@@ -17,13 +17,13 @@ class MoveTask:
 
 
 def parse_markdown(md: Path) -> Iterable[tuple[str, List[str]]]:
-    """Extract table rows from *md*.
+    """Extract ``(row_name, [wem_id, …])`` pairs from a SID table.
 
     Args:
-        md: Markdown file that contains a three-column SID table.
+        md: Markdown file containing the table.
 
     Yields:
-        Tuples ``(row_name, [wem_id, …])`` for each table row.
+        Each table row’s *Name* and a list of WEM-ID strings.
     """
     row = re.compile(r"^\|\s*\d+\s*\|\s*([^|]+)\s*\|\s*([0-9, ]+)\s*\|")
     with md.open() as fh:
@@ -41,17 +41,17 @@ def build_tasks(
     src_suffix: str = ".wem.wav",
     dst_suffix: str = ".wav",
 ) -> Iterator[MoveTask]:
-    """Create a MoveTask for every WEM ID found under *wiki_root*.
+    """Generate MoveTask objects for every WEM ID listed in the wiki.
 
     Args:
-        wiki_root: Directory containing *.md* SID tables.
-        src_dir: Folder with flat ``<wem_id>.wem.wav`` files.
-        dst_root: Destination root for organised folders.
-        src_suffix: Suffix of source files.
-        dst_suffix: Suffix for renamed files.
+        wiki_root: Root directory containing SID-wiki markdown files.
+        src_dir: Folder with flat ``<wem_id><src_suffix>`` files.
+        dst_root: Destination root for the organised tree.
+        src_suffix: Extension of source files.
+        dst_suffix: Extension for renamed files.
 
     Yields:
-        A sequence of MoveTask objects.
+        MoveTask objects describing each pending copy/move.
     """
     for md in wiki_root.rglob("*.md"):
         top = dst_root / md.stem
@@ -64,7 +64,7 @@ def build_tasks(
 
 
 def materialise(tasks: Iterable[MoveTask]) -> None:
-    """Create destination folders and perform all moves.
+    """Create folders and move each file.
 
     Args:
         tasks: Iterable of MoveTask items.
@@ -82,12 +82,12 @@ def categorise_wems(
     src_dir: Path,
     dst_root: Path,
 ) -> None:
-    """End-to-end workflow: build tasks, then move files.
+    """High-level helper: build tasks then move files.
 
     Args:
-        wiki_root: Root folder containing SID-wiki markdown files.
-        src_dir: Directory with flat WEM WAV files.
-        dst_root: Destination root for organised folders.
+        wiki_root: Root folder of SID-wiki markdown files.
+        src_dir: Folder of flat WAVs (``<id>.wem.wav``).
+        dst_root: Root of organised folder tree.
     """
     tasks = build_tasks(wiki_root, src_dir, dst_root)
     materialise(tasks)
