@@ -1,4 +1,17 @@
-"""BG3 audio asset tools: Convert, decode, group, and rename Wwise files."""
+"""BG3 audio-asset workflow.
+
+Copy `.env.example` to `.env`, set absolute paths, then:
+
+    pip install -r requirements.txt  # plus python-dotenv for .env loading
+    python categoriser.py
+
+Workflow
+--------
+1. Convert all *.wem* → *.wav* with vgmstream-cli.
+2. Decode *.bnk* archives to XML with wwiser.py.
+3. Group WAVs into folders that match their parent bank.
+4. Rename WAVs with human-friendly names from the SID-wiki markdown.
+"""
 
 from __future__ import annotations
 
@@ -8,13 +21,40 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable, Iterator
 
-WWISER_PY = Path("/home/rune/code/bg3/wwiser/wwiser.py")
-VGMSTREAM_DIR = Path("/home/rune/code/bg3/vgmstream")
-UNPACKED_DATA = Path("/home/rune/code/bg3/sounds/UnpackedData")
-AUDIO_CONVERTED = Path("/home/rune/code/bg3/sounds/converted")
-SIDS_WIKI = Path("/home/rune/code/bg3/bg3-sids.wiki")
+try:                       # optional convenience
+    from dotenv import load_dotenv
+    load_dotenv()          # loads .env into os.environ
+except ModuleNotFoundError:
+    pass
+
+
+def env_path(key: str) -> Path:
+    """Return an absolute path from ``key`` or abort with a clear error.
+
+    Args:
+        key: Environment-variable name to look up.
+
+    Returns:
+        Path resolved from the value of *key*.
+
+    Raises:
+        SystemExit: If the variable is missing or empty.
+    """
+    value = os.getenv(key)
+    if not value:
+        sys.exit(f"[env-error] Define {key} in .env (see .env.example).")
+    return Path(value)
+
+
+WWISER_PY = env_path("WWISER_PY")
+VGMSTREAM_DIR = env_path("VGMSTREAM_DIR")
+UNPACKED_DATA = env_path("UNPACKED_DATA")
+AUDIO_CONVERTED = env_path("AUDIO_CONVERTED")
+SIDS_WIKI = env_path("SIDS_WIKI")
+
+PROGRESS_BAR_MODE = os.getenv("PROGRESS_BAR_MODE", "auto").lower()
 
 SHOULD_CONVERT = True
 SHOULD_DECODE_BANKS = True
@@ -22,37 +62,76 @@ SHOULD_GROUP = True
 SHOULD_RENAME = True
 
 
-def progress(items: Iterable[Path]) -> Iterable[tuple[int, int, Path]]:
-    """Yield (idx, total, item) and print a progress counter."""
-    items = list(items)
-    total = len(items)
-    for idx, item in enumerate(items, 1):
-        print(f"\r  {idx}/{total}", end="", flush=True)
-        yield idx, total, item
-    print()
+def progress_bar() -> Callable[[Iterable],
+                               Iterator[tuple[int, int, object]]]:
+    """Pick the best progress-bar generator available.
+
+    Returns:
+        A generator that yields ``(index, total, item)`` and updates
+        a visual progress bar (alive-progress or plain stdout).
+    """
+
+    def basic(items: Iterable) -> Iterator[tuple[int, int, object]]:
+        items = list(items)
+        total = len(items)
+        for idx, item in enumerate(items, 1):
+            print(f"\r  {idx}/{total}", end="", flush=True)
+            yield idx, total, item
+        print()
+
+    try:
+        if PROGRESS_BAR_MODE in {"auto", "alive"}:
+            import alive_progress  # type: ignore
+
+            def alive(items: Iterable) -> Iterator[tuple[int, int, object]]:
+                seq = list(items)
+                total = len(seq)
+                with alive_progress.alive_bar(total) as bar:
+                    for idx, item in enumerate(seq, 1):
+                        yield idx, total, item
+                        bar()
+
+            return alive
+    except ModuleNotFoundError:
+        pass
+    return basic
 
 
-def vgmstream_exe() -> Path:
-    """Return path to vgmstream-cli, ensuring it is executable."""
-    exe_name = "vgmstream-cli.exe" if os.name == "nt" else "vgmstream-cli"
-    exe = VGMSTREAM_DIR / exe_name
+bar = progress_bar()
+
+
+def vgmstream_cli() -> Path:
+    """Return an executable path to ``vgmstream-cli``.
+
+    Ensures the binary is present and, on Unix, has its execute bit set.
+
+    Returns:
+        Absolute path to *vgmstream-cli*.
+
+    Raises:
+        SystemExit: If the binary is missing or lacks execute permissions.
+    """
+    exe = VGMSTREAM_DIR / ("vgmstream-cli.exe" if os.name == "nt"
+                           else "vgmstream-cli")
     if not exe.exists():
-        raise FileNotFoundError(f"{exe} not found. Build or install vgmstream.")
+        sys.exit("[env-error] vgmstream-cli not found in VGMSTREAM_DIR.")
     if os.name != "nt" and not os.access(exe, os.X_OK):
         try:
             exe.chmod(exe.stat().st_mode | 0o111)
-        except PermissionError as err:
-            raise PermissionError(
-                f"{exe} exists but is not executable. "
-                "Run `chmod +x` or move it off NTFS."
-            ) from err
+        except PermissionError as exc:
+            sys.exit(f"[perm-error] Cannot mark {exe} executable: {exc}")
     return exe
 
 
 def convert_wem_folder(src: Path, dst: Path) -> None:
-    """Convert all *.wem files in src to WAV files in dst."""
-    cli = vgmstream_exe()
-    for _, _, wem in progress(src.glob("*.wem")):
+    """Convert every *.wem* in *src* to WAV in *dst*.
+
+    Args:
+        src: Directory containing the original WEM files.
+        dst: Directory to receive the converted WAV files.
+    """
+    cli = vgmstream_cli()
+    for _, _, wem in bar(src.glob("*.wem")):
         out_file = dst / f"{wem.name}.wav"
         subprocess.run(
             [cli, "-o", out_file, wem],
@@ -64,8 +143,12 @@ def convert_wem_folder(src: Path, dst: Path) -> None:
 
 
 def decode_banks(src: Path) -> None:
-    """Run wwiser.py on each *.bnk in src to produce XML metadata."""
-    for _, _, bank in progress(src.glob("*.bnk")):
+    """Decode every *.bnk* in *src* to XML via wwiser.py.
+
+    Args:
+        src: Directory containing BNK bank files.
+    """
+    for _, _, bank in bar(src.glob("*.bnk")):
         subprocess.run(
             [sys.executable, WWISER_PY, "-d", "xsl", bank],
             check=True,
@@ -74,79 +157,87 @@ def decode_banks(src: Path) -> None:
         )
 
 
-def create_banks_folders(banks_dir: Path, sounds_dir: Path) -> None:
-    """Move WAVs into subfolders named after their parent bank."""
-    for _, _, xml in progress(banks_dir.glob("*.bnk.xml")):
-        bank_folder = sounds_dir / xml.stem
-        bank_folder.mkdir(exist_ok=True)
+def create_bank_folders(banks: Path, sounds: Path) -> None:
+    """Group WAVs into folders named after their parent bank.
+
+    Args:
+        banks: Folder containing *.bnk.xml* metadata.
+        sounds: Folder where flat WAVs currently reside.
+    """
+    for _, _, xml in bar(banks.glob("*.bnk.xml")):
+        folder = sounds / xml.stem
+        folder.mkdir(exist_ok=True)
         with xml.open() as fh:
             for line in fh:
-                if 'name="sourceID"' not in line:
-                    continue
-                sound_id = line.split('"')[-2]
-                src = sounds_dir / f"{sound_id}.wem.wav"
-                if src.exists():
-                    shutil.move(src, bank_folder / src.name)
+                if 'name="sourceID"' in line:
+                    sid = line.split('"')[-2]
+                    src = sounds / f"{sid}.wem.wav"
+                    if src.exists():
+                        shutil.move(src, folder / src.name)
 
 
-def sid_mapping(markdown: Path) -> dict[str, str]:
-    """Return {sound_id: new_name} mapping from a SID wiki markdown file."""
+def sid_mapping(md: Path) -> dict[str, str]:
+    """Build a mapping from sound-ID to descriptive filename.
+
+    Args:
+        md: Markdown file containing the SID table.
+
+    Returns:
+        Dictionary {sound_id: descriptive_name}.
+    """
     mapping: dict[str, str] = {}
-    with markdown.open() as fh:
+    with md.open() as fh:
         for line in fh:
             m = re.match(r"^\| \d+ \| (\w+) \| (.*) \|$", line)
-            if not m:
-                continue
-            base = m.group(1)
-            for idx, sid in enumerate(m.group(2).split(", ")):
-                mapping[sid] = f"{base}_{idx}"
+            if m:
+                base = m.group(1)
+                for idx, sid in enumerate(m.group(2).split(", ")):
+                    mapping[sid] = f"{base}_{idx}"
     return mapping
 
 
 def rename_files(root: Path) -> None:
-    """Rename *.wem.wav files using human-friendly names from SID wiki."""
+    """Rename WAVs in *root* using SID wiki mappings.
+
+    Args:
+        root: Top-level folder containing bank sub-folders of WAVs.
+    """
     md_files = list(SIDS_WIKI.glob("*.bnk.md"))
-    for _, _, folder in progress(p for p in root.iterdir() if p.is_dir()):
-        md = next(
-            (
-                m for m in md_files
-                if f"{folder.name}-" in m.name or f"{folder.name}.bnk.md" in m.name
-            ),
-            None,
-        )
-        if md is None:
-            print(f"  ✗ No mappings for {folder.name}")
+    for _, _, folder in bar(p for p in root.iterdir() if p.is_dir()):
+        md = next((m for m in md_files if folder.name in m.name), None)
+        if not md:
+            print(f"  ✗ No mapping for {folder.name}")
             continue
-        # Special-case file fix from original script
         if md.name == "Amb_[PAK]_Amb_Ps_Specific-_-AMB_PS_SPECIFIC.bnk.md":
-            md = SIDS_WIKI / "Ambience_[PAK]_Amb_Ps_Specific-_-AMB_PS_SPECIFIC.bnk.md"
-        id_map = sid_mapping(md)
+            md = (SIDS_WIKI /
+                  "Ambience_[PAK]_Amb_Ps_Specific-_-AMB_PS_SPECIFIC.bnk.md")
+        names = sid_mapping(md)
         for sound in folder.glob("*.wem.wav"):
             sid = sound.stem.split(".")[0]
-            if sid in id_map:
-                sound.rename(folder / f"{id_map[sid]}.wav")
+            if sid in names:
+                sound.rename(folder / f"{names[sid]}.wav")
 
 
 def ensure_dirs(*paths: Path) -> None:
-    """Create each directory (with parents) if it does not exist."""
+    """Create directories (and parents) if they do not yet exist."""
     for path in paths:
         path.mkdir(parents=True, exist_ok=True)
 
 
-def main() -> None:
-    """Run the asset conversion pipeline."""
-    src_sound = UNPACKED_DATA / "SharedSounds" / "Public" / "Shared" / "Assets" / "Sound"
-    src_sound_dev = UNPACKED_DATA / "SharedSounds" / "Public" / "SharedDev" / "Assets" / "Sound"
-    src_banks = UNPACKED_DATA / "SharedSoundBanks" / "Public" / "Shared" / "Assets" / "Sound"
-    src_banks_dev = UNPACKED_DATA / "SharedSoundBanks" / "Public" / "SharedDev" / "Assets" / "Sound"
+def main() -> None:  # noqa: C901 (CLI complexity)
+    """Orchestrate the four pipeline stages."""
+    src_sound = UNPACKED_DATA / "SharedSounds/Public/Shared/Assets/Sound"
+    src_sound_dev = (UNPACKED_DATA /
+                     "SharedSounds/Public/SharedDev/Assets/Sound")
+    src_banks = UNPACKED_DATA / "SharedSoundBanks/Public/Shared/Assets/Sound"
+    src_banks_dev = (UNPACKED_DATA /
+                     "SharedSoundBanks/Public/SharedDev/Assets/Sound")
 
     dst_sound = AUDIO_CONVERTED / "Shared"
     dst_sound_dev = AUDIO_CONVERTED / "SharedDev"
 
-    ensure_dirs(
-        src_sound, src_sound_dev, src_banks, src_banks_dev,
-        dst_sound, dst_sound_dev,
-    )
+    ensure_dirs(src_sound, src_sound_dev, src_banks, src_banks_dev,
+                dst_sound, dst_sound_dev)
 
     if SHOULD_CONVERT:
         print("Converting sound files\n  Shared")
@@ -162,9 +253,9 @@ def main() -> None:
 
     if SHOULD_GROUP:
         print("Grouping files by bank\n  Shared")
-        create_banks_folders(src_banks, dst_sound)
+        create_bank_folders(src_banks, dst_sound)
         print("  SharedDev")
-        create_banks_folders(src_banks_dev, dst_sound_dev)
+        create_bank_folders(src_banks_dev, dst_sound_dev)
 
     if SHOULD_RENAME:
         print("Renaming files\n  Shared")
