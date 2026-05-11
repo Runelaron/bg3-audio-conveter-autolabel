@@ -1,5 +1,6 @@
 .venv
 .env
+__pycache__/
 *.wem
 *.wav
 *.bnk
@@ -10,3 +11,8 @@ bg3-modders-multitool/
 vgmstream/
 wwiser.pyz
 wwnames.db3
+
+# BEGIN workspace-tooling
+# Generated tooling artifacts
+artifacts/
+# END workspace-tooling

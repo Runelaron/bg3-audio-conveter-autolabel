@@ -1,0 +1,253 @@
+{
+  "schema_version": 1,
+  "repo": {
+    "repo_id": "bg3-audio-converter-autolabel-fix",
+    "path": "rune/bg3-audio-conveter-autolabel-fix",
+    "archetype": "uv-research",
+    "scan_tier": "standard",
+    "containerized": false,
+    "default_branch": "script-enhancement",
+    "git_policy_profile": "standard-promoted",
+    "github_flow_profile": "free-private",
+    "integration_branch": "dev",
+    "production_branch": "prod",
+    "dockerfiles": [],
+    "compose_files": [],
+    "npm_directories": [],
+    "bootstrap": {
+      "ci": {
+        "commands": [
+          "uv sync --group dev"
+        ],
+        "tools": [
+          "gitleaks",
+          "trivy",
+          "actionlint",
+          "zizmor",
+          "conftest",
+          "yamllint",
+          "pip-audit"
+        ]
+      },
+      "security": {
+        "commands": [
+          "uv sync --group dev"
+        ],
+        "tools": [
+          "gitleaks",
+          "trivy",
+          "actionlint",
+          "zizmor",
+          "conftest",
+          "yamllint",
+          "pip-audit"
+        ]
+      },
+      "container": {
+        "commands": [
+          "uv sync --group dev"
+        ],
+        "tools": [
+          "gitleaks",
+          "trivy",
+          "actionlint",
+          "zizmor",
+          "conftest",
+          "yamllint",
+          "pip-audit"
+        ]
+      }
+    },
+    "ui_cli": {
+      "enabled": false,
+      "mode": "",
+      "commands": []
+    }
+  },
+  "targets": {
+    "repo-brief": {
+      "kind": "brief",
+      "steps": []
+    },
+    "bootstrap-ci": {
+      "kind": "commands",
+      "steps": [
+        {
+          "name": "bootstrap-ci",
+          "required": true,
+          "category": "bootstrap",
+          "command": "python3 tooling/bin/bootstrap_env.py bootstrap-ci"
+        }
+      ]
+    },
+    "bootstrap-security": {
+      "kind": "commands",
+      "steps": [
+        {
+          "name": "bootstrap-security",
+          "required": true,
+          "category": "bootstrap",
+          "command": "python3 tooling/bin/bootstrap_env.py bootstrap-security"
+        }
+      ]
+    },
+    "verify-paths": {
+      "kind": "commands",
+      "steps": [
+        {
+          "name": "verify-paths",
+          "required": true,
+          "category": "path-hygiene",
+          "command": "python3 tooling/bin/repo_path_hygiene.py --check --refresh-report"
+        }
+      ]
+    },
+    "fix-paths-safe": {
+      "kind": "commands",
+      "steps": [
+        {
+          "name": "fix-paths-safe",
+          "required": false,
+          "category": "path-hygiene",
+          "command": "python3 tooling/bin/repo_path_hygiene.py --rewrite-safe --refresh-report"
+        }
+      ]
+    },
+    "verify-fast": {
+      "kind": "commands",
+      "steps": [
+        {
+          "name": "verify-fast-01",
+          "required": true,
+          "category": "verify-fast",
+          "command": "python3 -m unittest -v"
+        }
+      ]
+    },
+    "verify": {
+      "kind": "commands",
+      "steps": [
+        {
+          "name": "verify-01",
+          "required": true,
+          "category": "verify",
+          "command": "python3 -m unittest -v"
+        }
+      ]
+    },
+    "verify-security": {
+      "kind": "commands",
+      "steps": [
+        {
+          "name": "gitleaks",
+          "required": true,
+          "category": "secret-scan",
+          "command": "gitleaks detect --no-git --no-banner --redact --max-target-megabytes 10 --report-format json --report-path \"{artifact_root}/gitleaks.json\" --config tooling/configs/gitleaks/gitleaks.toml --source .",
+          "tool": "gitleaks"
+        },
+        {
+          "name": "trivy-fs",
+          "required": true,
+          "category": "security-scan",
+          "command": "trivy fs --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln,secret,misconfig,license --skip-dirs artifacts --skip-dirs archive --skip-dirs _archive --skip-dirs .data --skip-dirs outputs --skip-dirs packs --skip-dirs node_modules --skip-dirs .venv --skip-dirs .pytest_cache --skip-dirs .ruff_cache --skip-dirs .mypy_cache --skip-dirs .nox --skip-dirs .tox --skip-dirs .uv-cache --skip-dirs dist --skip-dirs build --skip-dirs coverage .",
+          "tool": "trivy"
+        },
+        {
+          "name": "workflow-actionlint",
+          "required": true,
+          "category": "workflow",
+          "command": "if compgen -G \".github/workflows/tooling-*.yml\" > /dev/null; then actionlint .github/workflows/tooling-*.yml; elif compgen -G \".github/workflows/*.yml\" > /dev/null; then actionlint .github/workflows/*.yml; else echo \"no workflows detected\"; fi",
+          "tool": "actionlint"
+        },
+        {
+          "name": "workflow-zizmor",
+          "required": true,
+          "category": "workflow",
+          "command": "if compgen -G \".github/workflows/tooling-*.yml\" > /dev/null; then zizmor .github/workflows/tooling-*.yml; elif compgen -G \".github/workflows/*.yml\" > /dev/null; then zizmor .github/workflows/*.yml; else echo \"no workflows detected\"; fi",
+          "tool": "zizmor"
+        },
+        {
+          "name": "workflow-conftest",
+          "required": true,
+          "category": "workflow",
+          "command": "if compgen -G \".github/workflows/tooling-*.yml\" > /dev/null; then conftest test --all-namespaces -p tooling/policies/conftest/github-actions .github/workflows/tooling-*.yml; elif compgen -G \".github/workflows/*.yml\" > /dev/null; then conftest test --all-namespaces -p tooling/policies/conftest/github-actions .github/workflows/*.yml; else echo \"no workflows detected\"; fi",
+          "tool": "conftest"
+        },
+        {
+          "name": "workflow-yamllint",
+          "required": true,
+          "category": "workflow",
+          "command": "if compgen -G \".github/workflows/tooling-*.yml\" > /dev/null; then yamllint -c tooling/configs/yamllint/yamllint.yaml .github/workflows/tooling-*.yml; elif compgen -G \".github/workflows/*.yml\" > /dev/null; then yamllint -c tooling/configs/yamllint/yamllint.yaml .github/workflows/*.yml; else echo \"no workflows detected\"; fi",
+          "tool": "yamllint"
+        },
+        {
+          "name": "pip-audit",
+          "required": false,
+          "category": "dependency-scan",
+          "command": "if [ -f pyproject.toml ]; then uv export --format requirements-txt --no-hashes > \"{artifact_root}/python-requirements.txt\" && pip-audit -r \"{artifact_root}/python-requirements.txt\" --no-deps --disable-pip; else echo \"python dependency audit not applicable\"; fi",
+          "tool": "pip-audit"
+        }
+      ]
+    },
+    "doctor": {
+      "kind": "commands",
+      "steps": [
+        {
+          "name": "doctor-01",
+          "required": true,
+          "category": "doctor",
+          "command": "command -v python3 >/dev/null 2>&1"
+        },
+        {
+          "name": "doctor-02",
+          "required": true,
+          "category": "doctor",
+          "command": "command -v vgmstream-cli >/dev/null 2>&1"
+        },
+        {
+          "name": "doctor-03",
+          "required": true,
+          "category": "doctor",
+          "command": "[ -n \"${WWISER_PY:-}\" ] && [ -f \"${WWISER_PY}\" ]"
+        }
+      ]
+    },
+    "review-ready": {
+      "kind": "review-ready",
+      "prep_steps": [],
+      "core_targets": [
+        "repo-brief",
+        "verify-paths",
+        "doctor",
+        "verify-fast",
+        "verify",
+        "verify-security"
+      ],
+      "full_targets": [
+        "repo-brief",
+        "verify-paths",
+        "doctor",
+        "verify-fast",
+        "verify",
+        "verify-security",
+        "ci-local"
+      ],
+      "advisory_targets": [
+        "doctor",
+        "ci-local"
+      ]
+    },
+    "verify-ci": {
+      "kind": "composite",
+      "targets": [
+        "verify-paths",
+        "verify-fast",
+        "verify",
+        "verify-security"
+      ]
+    },
+    "ci-local": {
+      "kind": "ci-local"
+    }
+  }
+}
