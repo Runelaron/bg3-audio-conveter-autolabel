@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -73,6 +74,16 @@ BINARY_TOOL_SPECS = {
         "sha256": "777b4bb7ddd10bdcc8a1aa398d37d05e91e866e7586f9cff3fca2f72b8153033",
     },
 }
+INITIAL_DOWNLOAD_HOSTS = frozenset({"github.com"})
+REDIRECT_DOWNLOAD_HOSTS = frozenset(
+    {
+        "github.com",
+        "objects.githubusercontent.com",
+        "release-assets.githubusercontent.com",
+        "github-releases.githubusercontent.com",
+    }
+)
+ALLOWED_DOWNLOAD_URLS = frozenset(str(spec["url"]) for spec in BINARY_TOOL_SPECS.values())
 
 
 def tooling_log(message: str) -> None:
@@ -205,9 +216,33 @@ def install_python_tool(tool: str) -> None:
     run(["uv", "tool", "install", "--force", spec])
 
 
+def _validate_download_url(url: str) -> str:
+    if url not in ALLOWED_DOWNLOAD_URLS:
+        raise SystemExit(f"download URL is not in the pinned tool allowlist: {url}")
+    parsed = urllib.parse.urlparse(url)
+    hostname = (parsed.hostname or "").lower()
+    if parsed.scheme != "https" or hostname not in INITIAL_DOWNLOAD_HOSTS:
+        raise SystemExit(f"download URL must use an approved HTTPS host: {url}")
+    if parsed.username or parsed.password:
+        raise SystemExit(f"download URL must not include credentials: {url}")
+    return url
+
+
+def _validate_redirect_url(url: str) -> None:
+    parsed = urllib.parse.urlparse(url)
+    hostname = (parsed.hostname or "").lower()
+    if parsed.scheme != "https" or hostname not in REDIRECT_DOWNLOAD_HOSTS:
+        raise SystemExit(f"download redirected to an unapproved URL: {url}")
+    if parsed.username or parsed.password:
+        raise SystemExit(f"download redirect must not include credentials: {url}")
+
+
 def _download(url: str, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
-    with urllib.request.urlopen(url) as response, destination.open("wb") as handle:
+    request = urllib.request.Request(_validate_download_url(url), method="GET")
+    # URL input is pinned above and final redirects are checked before bytes are trusted.
+    with urllib.request.urlopen(request) as response, destination.open("wb") as handle:  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
+        _validate_redirect_url(response.geturl())
         shutil.copyfileobj(response, handle)
 
 

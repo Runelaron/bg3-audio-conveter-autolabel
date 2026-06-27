@@ -1,10 +1,11 @@
 name: Tooling / CI Core
 
 on:
-  pull_request:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
