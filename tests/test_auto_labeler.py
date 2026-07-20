@@ -71,6 +71,23 @@ class AutoLabelerTests(unittest.TestCase):
 
         self.assertEqual(first, second)
 
+    def test_operation_callback_reports_every_task(self) -> None:
+        operations: list[dict[str, object]] = []
+
+        report = auto_labeler.categorise_wems(
+            self.wiki,
+            self.src,
+            self.dst,
+            dry_run=True,
+            on_operation=operations.append,
+        )
+
+        self.assertEqual(len(operations), report["total_tasks"])
+        statuses = [operation["status"] for operation in operations]
+        self.assertEqual(statuses.count("planned"), 6)
+        self.assertEqual(statuses.count("missing_source"), 1)
+        self.assertFalse(self.dst.exists())
+
     def test_windows_unsafe_names_are_sanitized(self) -> None:
         auto_labeler.categorise_wems(self.wiki, self.src, self.dst)
         forbidden = set('<>:"/\\|?*')

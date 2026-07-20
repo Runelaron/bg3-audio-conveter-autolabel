@@ -17,7 +17,7 @@ import sys
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Iterator
+from typing import Callable, Iterable, Iterator
 
 
 SAFE_CHARS = f"-_. {string.ascii_letters}{string.digits}"
@@ -285,6 +285,7 @@ def materialise(
     duplicate_mode: str,
     conflict_mode: str,
     dry_run: bool,
+    on_operation: Callable[[dict[str, object]], None] | None = None,
 ) -> dict[str, object]:
     """Create needed folders and copy/move/link files as specified."""
     task_list = list(tasks)
@@ -320,10 +321,34 @@ def materialise(
         )
         if source_candidate is None and resolution == "missing":
             report["missing_sources"] += 1
+            if on_operation is not None:
+                on_operation(
+                    {
+                        "sid": task.sid,
+                        "source": None,
+                        "destination": str(task.dst),
+                        "bank_hint": task.bank_hint,
+                        "resolution": resolution,
+                        "status": "missing_source",
+                        "operation_mode": None,
+                    }
+                )
             print(f"⚠  missing source for SID {task.sid} -> {task.dst.name}")
             continue
         if source_candidate is None and resolution == "ambiguous":
             report["ambiguous_sources"] += 1
+            if on_operation is not None:
+                on_operation(
+                    {
+                        "sid": task.sid,
+                        "source": None,
+                        "destination": str(task.dst),
+                        "bank_hint": task.bank_hint,
+                        "resolution": resolution,
+                        "status": "ambiguous_source",
+                        "operation_mode": None,
+                    }
+                )
             print(f"⚠  ambiguous source for SID {task.sid} -> {task.dst.name}")
             continue
 
@@ -339,13 +364,23 @@ def materialise(
         if had_conflict:
             report["destination_conflicts"] += 1
         reserved_paths.add(dst)
+        effective_mode = _select_mode(duplicate_mode, sid_usage[task.sid])
+        operation: dict[str, object] = {
+            "sid": task.sid,
+            "source": str(src),
+            "destination": str(dst),
+            "bank_hint": task.bank_hint,
+            "resolution": resolution,
+            "destination_conflict": had_conflict,
+            "operation_mode": effective_mode,
+        }
 
         if src.resolve() == dst.resolve() or _same_file_content(src, dst):
             report["skipped_existing"] += 1
             report["labeled"] += 1
+            if on_operation is not None:
+                on_operation({**operation, "status": "skipped_existing"})
             continue
-
-        effective_mode = _select_mode(duplicate_mode, sid_usage[task.sid])
 
         if dry_run:
             if effective_mode == "move":
@@ -355,6 +390,8 @@ def materialise(
             else:
                 report["copied"] += 1
             report["labeled"] += 1
+            if on_operation is not None:
+                on_operation({**operation, "status": "planned"})
             continue
 
         dst.parent.mkdir(parents=True, exist_ok=True)
@@ -370,10 +407,14 @@ def materialise(
                 shutil.copy2(src, dst)
                 report["copied"] += 1
                 report["link_fallback_copies"] += 1
+                operation["operation_mode"] = "copy"
+                operation["fallback_from"] = "link"
         else:
             shutil.copy2(src, dst)
             report["copied"] += 1
         report["labeled"] += 1
+        if on_operation is not None:
+            on_operation({**operation, "status": "applied"})
 
     report["unused_source_files"] = len(set(source_index.all_files) - used_source_paths)
 
@@ -389,6 +430,7 @@ def categorise_wems(
     duplicate_mode: str = "copy",
     conflict_mode: str = "suffix",
     dry_run: bool = False,
+    on_operation: Callable[[dict[str, object]], None] | None = None,
 ) -> dict[str, object]:
     """Organize WAVs into folders/names by SID-wiki definitions.
 
@@ -401,6 +443,7 @@ def categorise_wems(
         duplicate_mode: ``copy`` | ``move`` | ``link``.
         conflict_mode: Conflict strategy; currently only ``suffix``.
         dry_run: Build a plan without mutating files.
+        on_operation: Optional callback invoked once for every label task.
 
     Returns:
         Summary report of planned/applied operations.
@@ -420,7 +463,14 @@ def categorise_wems(
 
     source_index = build_source_index(src_dir, src_suffix)
     tasks = build_tasks(wiki_root, dst_root, dst_suffix)
-    report = materialise(tasks, source_index, duplicate_mode, conflict_mode, dry_run)
+    report = materialise(
+        tasks,
+        source_index,
+        duplicate_mode,
+        conflict_mode,
+        dry_run,
+        on_operation,
+    )
     report["source_root"] = str(src_dir)
     report["destination_root"] = str(dst_root)
     report["wiki_root"] = str(wiki_root)

@@ -134,6 +134,78 @@ python3 auto_labeler.py \
 - `--dry-run` to plan without writes
 - `--report PATH` to write JSON summary
 
+## Safe Label Operator
+
+The stable label-only profile is `label-fixture-core`. It runs the real
+`auto_labeler.py` planning and copy logic without requiring `vgmstream`,
+`wwiser`, game installation paths, network access, or provider calls. The
+existing `main.py` and direct auto-labeler commands remain available as
+compatibility entrypoints for the full/manual pipeline.
+
+From a clean checkout, verify the tracked-fixture profile:
+
+```sh
+./scripts/label-doctor --stage smoke
+./scripts/label-smoke
+```
+
+`label-smoke` exercises the complete bounded path: read-only plan, approved
+copy-only apply, generated report inspection, repeat apply with no new copies,
+unconfirmed rollback refusal, confirmed rollback, and source hash preservation.
+It writes clean/current-SHA evidence to
+`artifacts/tooling/bg3-label-core/operator-result.json` and removes its generated
+smoke run before returning.
+
+For converted local assets, choose a unique run name and inspect the plan first:
+
+```sh
+./scripts/label-doctor \
+  --stage plan \
+  --src /path/to/converted/Shared \
+  --wiki /path/to/bg3-sids.wiki \
+  --run-name shared-review-001
+
+./scripts/label-plan \
+  --src /path/to/converted/Shared \
+  --wiki /path/to/bg3-sids.wiki \
+  --run-name shared-review-001
+```
+
+Planning is read-only: it does not create the artifact root, output directories,
+or a report file. The JSON printed to standard output contains every planned,
+missing, or ambiguous task.
+
+Apply only after reviewing that JSON:
+
+```sh
+APPROVE=1 ./scripts/label-apply \
+  --src /path/to/converted/Shared \
+  --wiki /path/to/bg3-sids.wiki \
+  --run-name shared-review-001
+
+python3 -m json.tool \
+  artifacts/bg3-label/generated/shared-review-001/.bg3-label/report.json
+```
+
+The operator only copies into
+`artifacts/bg3-label/generated/shared-review-001/labels`. Its ownership marker
+and report are stored under that run's `.bg3-label/` directory. It refuses a
+dirty worktree, unsafe run names, symlinked operator roots, unknown pre-existing
+output, or changed inputs. It never moves or deletes source audio.
+
+Run the same approved command again to verify idempotence. The second report
+must show `copied: 0`, all resolved labels as `skipped_existing`, and
+`idempotent_repeat: true`. Normal operator runs remain available for inspection;
+remove one only with explicit confirmation:
+
+```sh
+CONFIRM=1 ./scripts/label-rollback --run-name shared-review-001
+```
+
+Rollback validates the ownership marker and every generated file hash. It
+refuses modified, untracked, incomplete, or symlinked runs, removes only the
+named generated run, and never removes source or wiki content.
+
 ## Verification
 
 Run the repo test suite from the repo root:
@@ -145,7 +217,7 @@ make verify-fast
 Underlying repo-native command:
 
 ```sh
-python3 -m unittest -v
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v
 ```
 
 For a live audit with real converted assets, point `SIDS_WIKI` at the wiki checkout and run the label-only command above. Use `BG3_LABEL_STRICT=1` only when you want unresolved known mappings to fail the run.
