@@ -16,3 +16,7 @@ wwnames.db3
 # Generated tooling artifacts
 artifacts/
 # END workspace-tooling
+
+# Tiny deterministic test corpus; real game audio remains ignored.
+!tests/fixtures/**/*.wav
+!tests/fixtures/**/*.bnk.xml
