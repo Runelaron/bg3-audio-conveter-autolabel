@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "repo": {
-    "repo_id": "bg3-audio-converter-autolabel-fix",
-    "path": "rune/bg3-audio-conveter-autolabel-fix",
+    "repo_id": "bg3-audio-converter-autolabel",
+    "path": "rune/bg3/bg3-audio-converter-autolabel",
     "archetype": "uv-research",
     "scan_tier": "standard",
     "containerized": false,
@@ -205,12 +205,12 @@
     "folder_organization": {
       "schema_version": 1,
       "policy_id": "templates.folder-organization.v1",
-      "repo_id": "bg3-audio-converter-autolabel-fix",
+      "repo_id": "bg3-audio-converter-autolabel",
       "status": "declared",
       "mode": "warn",
       "profile": "application",
       "archetype": "uv-research",
-      "repo_path": "rune/bg3-audio-conveter-autolabel-fix",
+      "repo_path": "rune/bg3/bg3-audio-converter-autolabel",
       "audit_only": false,
       "directories": [
         {
@@ -341,7 +341,7 @@
         "results",
         "runs"
       ],
-      "contract_fingerprint": "aa2e3f2752c96bdc791ed390f800fdeab0c4d6c45359bc8c2fa79f2b23fca287",
+      "contract_fingerprint": "8870a4dda31411010bd192cf719e84083b1940465c1547a3119c1ee2a8b3a7b9",
       "placement_rule": "use an existing declared root or update the folder contract before creating a top-level directory"
     },
     "cad": {

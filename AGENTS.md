@@ -105,7 +105,7 @@ Profile: local
 
 ## Review And Promotion Loop
 
-- From `${WORKSPACE_ROOT}`, start repo work with `tpl repo bg3-audio-converter-autolabel-fix`.
+- From `${WORKSPACE_ROOT}`, start repo work with `tpl repo bg3-audio-converter-autolabel`.
 - Then run `make repo-brief TOOLING_SUMMARY_ONLY=1`, `make verify-fast`, and
   `make review-ready TOOLING_SUMMARY_ONLY=1`.
 - Use `REVIEW_READY_SCOPE=full make review-ready TOOLING_SUMMARY_ONLY=1` only

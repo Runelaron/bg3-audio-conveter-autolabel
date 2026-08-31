@@ -2,7 +2,7 @@
 
 This directory is generated from the workspace tooling control plane.
 
-- `repo_id`: `bg3-audio-converter-autolabel-fix`
+- `repo_id`: `bg3-audio-converter-autolabel`
 - `archetype`: `uv-research`
 - `containerized`: `false`
 
