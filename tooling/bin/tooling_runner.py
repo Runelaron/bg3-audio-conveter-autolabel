@@ -17,7 +17,12 @@ from typing import Any
 
 sys.dont_write_bytecode = True
 
-from python_runtime import route_advice as python_route_advice, runtime_info as python_runtime_info
+from python_runtime import route_advice as python_route_advice, runtime_info as python_runtime_info  # noqa: E402
+
+try:
+    from folder_organization import assess_repo_layout  # noqa: E402
+except ModuleNotFoundError:  # One-cycle compatibility for pre-contract rendered adapters.
+    assess_repo_layout = None
 
 
 SCHEMA_VERSION = 1
@@ -589,10 +594,12 @@ def ui_cli_info(root: Path, repo_cfg: dict[str, Any], targets: dict[str, Any]) -
                 vitest_browser_detected = vitest_browser_detected or "browser" in lowered or "vitest" in lowered
 
     mode = str(repo_cfg.get("ui_cli", {}).get("mode", "")).strip()
+    profile = str(repo_cfg.get("ui_cli", {}).get("profile", "")).strip()
     return {
         "detected": bool(package_jsons or configs or browser_scripts),
         "rendered_target": "verify-ui-cli" in targets,
         "mode": mode,
+        "profile": profile,
         "declared_commands": list(repo_cfg.get("ui_cli", {}).get("commands", [])),
         "package_jsons": package_jsons,
         "configs": sorted(set(configs)),
@@ -605,6 +612,9 @@ def ui_cli_info(root: Path, repo_cfg: dict[str, Any], targets: dict[str, Any]) -
             "npm": shutil.which("npm") is not None,
             "npx": shutil.which("npx") is not None,
             "xvfb-run": resolve_tool("xvfb-run") is not None,
+            "maestro": resolve_tool("maestro") is not None
+            or (Path.home() / ".local" / "bin" / "maestro").is_file()
+            or (Path.home() / ".maestro" / "bin" / "maestro").is_file(),
         },
     }
 
@@ -1141,6 +1151,18 @@ def collect_base_summary(root: Path, config: dict[str, Any], target: str, artifa
     previous_summary = load_latest_summary(log_root, target)
     previous_compact = compact_previous_summary(previous_summary)
     active_lane = load_active_lane(root, repo_cfg, git)
+    folder_contract = repo_cfg.get("folder_organization", {})
+    if isinstance(folder_contract, dict) and folder_contract and assess_repo_layout is not None:
+        folder_assessment = assess_repo_layout(root, folder_contract)
+    elif isinstance(folder_contract, dict) and folder_contract:
+        folder_assessment = {
+            "status": "checker_unavailable",
+            "metrics": {},
+            "findings": [{"code": "folder_checker_missing", "severity": "warn"}],
+            "next_action": "render the current shared adapter, then rerun `make repo-brief`",
+        }
+    else:
+        folder_assessment = {"status": "not_configured", "metrics": {}, "findings": [], "next_action": ""}
     summary = {
         "schema_version": SCHEMA_VERSION,
         "generated_at": utc_now(),
@@ -1155,6 +1177,7 @@ def collect_base_summary(root: Path, config: dict[str, Any], target: str, artifa
             "ui_review": ui_review_info(root, repo_cfg, config["targets"]),
             "repo_local_agents": repo_agents_path.exists(),
             "repo_local_agents_path": str(repo_agents_path) if repo_agents_path.exists() else "",
+            "folder_organization_assessment": folder_assessment,
         },
         "git": git,
         "targets": {
@@ -1301,6 +1324,8 @@ def populate_brief_findings(summary: dict[str, Any]) -> None:
             summary["findings"].append("ui-cli: Playwright detected; install repo-managed browsers with `npx playwright install chromium` when browser binaries are missing")
     if ui_cli.get("mode") == "xvfb" and not ui_cli.get("tools", {}).get("xvfb-run"):
         summary["findings"].append("unavailable: verify-ui-cli requires `xvfb-run`; install the optional UI/browser tooling pack")
+    if ui_cli.get("mode") == "android-device" and not ui_cli.get("tools", {}).get("maestro"):
+        summary["findings"].append("unavailable: Android-device verify-ui-cli requires the pinned optional Maestro CLI")
     ui_review = repo.get("ui_review", {})
     if ui_review.get("enabled"):
         rendered_targets = ui_review.get("rendered_targets", [])
@@ -1602,6 +1627,21 @@ def write_summary(summary: dict[str, Any], artifact_dir: Path) -> None:
             f"- python_test_command: `{python_runtime.get('test_command') or 'none'}`",
             f"- raw_python_allowed: `{python_runtime.get('raw_python_allowed', False)}`",
         ]
+    folder_assessment = summary["repo"].get("folder_organization_assessment", {})
+    if folder_assessment:
+        insert_at = md_lines.index("## Git") - 1
+        folder_metrics = folder_assessment.get("metrics", {})
+        md_lines[insert_at:insert_at] = [
+            "## Folder Organization",
+            "",
+            f"- status: `{folder_assessment.get('status', 'not_configured')}`",
+            f"- profile: `{folder_assessment.get('profile', 'none')}`",
+            f"- purpose_coverage: `{folder_metrics.get('top_level_purpose_coverage_pct', 0)}%`",
+            f"- undeclared_top_level_dirs: `{folder_metrics.get('undeclared_top_level_dir_count', 0)}`",
+            f"- placement_rule: `{summary['repo'].get('folder_organization', {}).get('placement_rule', 'use an existing declared root')}`",
+            f"- next_action: `{folder_assessment.get('next_action', 'none')}`",
+            "",
+        ]
     stale_reasons = summary["analysis"].get("artifact_stale_reasons") or []
     previous_stale_reasons = summary["analysis"].get("previous_artifact_stale_reasons") or []
     md_lines.append(f"- artifact_stale_reasons: `{'; '.join(stale_reasons) or 'none'}`")
@@ -1784,6 +1824,17 @@ def print_summary(summary: dict[str, Any], artifact_dir: Path) -> None:
                 f"{python_runtime.get('manager', 'none')} preferred={python_runtime.get('preferred_python_command') or 'none'} "
                 f"raw_python_allowed={python_runtime.get('raw_python_allowed', False)}"
             )
+        folder_assessment = summary["repo"].get("folder_organization_assessment", {})
+        folder_metrics = folder_assessment.get("metrics", {}) if isinstance(folder_assessment, dict) else {}
+        lines.append(
+            "[tooling] folder_organization="
+            f"{folder_assessment.get('status', 'not_configured')} "
+            f"purpose_coverage={folder_metrics.get('top_level_purpose_coverage_pct', 0)}% "
+            f"undeclared={folder_metrics.get('undeclared_top_level_dir_count', 0)}"
+        )
+        placement_rule = summary["repo"].get("folder_organization", {}).get("placement_rule", "")
+        if placement_rule:
+            lines.append(f"[tooling] folder_placement_rule={placement_rule}")
         github = summary["github"]
         gh_state = "authenticated" if github["authenticated"] else github["error"] or "unavailable"
         lines.append(f"[tooling] gh={gh_state}")

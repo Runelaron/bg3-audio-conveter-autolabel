@@ -18,10 +18,10 @@ Profile: local
 
 ## Shared Docker Guidance
 
-- Install `tpldeck`, `uvbootstrap`, and the Codex Docker bridge from `/home/rune/code/.templates/scripts/install-shell-helpers.sh`.
+- Install `tpldeck`, `uvbootstrap`, and the Codex Docker bridge from `${WORKSPACE_ROOT}/.templates/scripts/install-shell-helpers.sh`.
 - From a `rune` shell, use `codex-run ...` or `codex-docker ...` for agent or container work in the dedicated rootless `codex` Docker environment.
 - Keep plain `docker ...` on `rune` for human Docker work.
-- If the helpers are missing, check `/home/rune/code/.templates/runbooks/docker/ubuntu_24_04_wsl2_dual_rootless_docker_runbook.md`.
+- If the helpers are missing, check `${WORKSPACE_ROOT}/.templates/runbooks/docker/ubuntu_24_04_wsl2_dual_rootless_docker_runbook.md`.
 - Do not rely on `/var/run/docker.sock`, the `docker` group, or cross-user socket sharing for Codex work.
 
 ## Deterministic Tooling First
@@ -37,8 +37,8 @@ Profile: local
   - `python3 main.py`
   - `python3 -m unittest -v`
 - `make doctor` is the readiness surface for `python3`, `vgmstream-cli`, and a valid `WWISER_PY` path.
-- Use `/home/rune/code/.templates/docs/observability/tooling_status.md` for the shared bridge inventory and install status.
-- Use `/home/rune/code/.templates/scripts/README.md` for the shared deterministic entrypoint catalog.
+- Use `${WORKSPACE_ROOT}/.templates/docs/observability/tooling_status.md` for the shared bridge inventory and install status.
+- Use `${WORKSPACE_ROOT}/.templates/scripts/README.md` for the shared deterministic entrypoint catalog.
 - Use `codex-run`, `codex-docker`, `codex-exec`, and `codex-<tool>` only as fallback or when validating the shared bridge layer itself.
 
 ## Operating Rules
@@ -87,6 +87,11 @@ Profile: local
 - Use descriptive branch names and commit messages.
 - If behavior changes, document what changed, why it changed, and how to verify it.
 - Prefer concise Markdown docs and ISO 8601 dates (`YYYY-MM-DD`) when dates matter.
+- Before creating or moving a top-level directory, inspect the folder map in
+  `make repo-brief TOOLING_SUMMARY_ONLY=1` and the rendered
+  `repo.folder_organization` contract in `tooling/configs/tooling-targets.json`.
+- Do not use task, branch, date, or agent names as permanent root categories.
+  Update the shared contract before introducing a durable root.
 
 ## When Uncertain
 
@@ -100,7 +105,7 @@ Profile: local
 
 ## Review And Promotion Loop
 
-- From `/home/rune/code`, start repo work with `tpl repo bg3-audio-converter-autolabel-fix`.
+- From `${WORKSPACE_ROOT}`, start repo work with `tpl repo bg3-audio-converter-autolabel-fix`.
 - Then run `make repo-brief TOOLING_SUMMARY_ONLY=1`, `make verify-fast`, and
   `make review-ready TOOLING_SUMMARY_ONLY=1`.
 - Use `REVIEW_READY_SCOPE=full make review-ready TOOLING_SUMMARY_ONLY=1` only
