@@ -119,17 +119,16 @@ Profile: local
 
 ## Scoped Execution And Completion
 
-Policy version: `repo-completion-v6-2026-09-23`. Repository-specific security, data,
+Policy version: `repo-completion-v7-2026-09-23`. Repository-specific security, data,
 integration, and promotion restrictions remain authoritative within the task.
 
 - Treat action requests as work to finish, not an acknowledgment of capability;
   honor planning-only requests. Keep every accepted outcome across side questions
   and checkpoints. An intermediate milestone, tests, or a review packet is not
-  proof of the requested result.
+  proof of a requested practical run; require observed acceptance evidence.
 - For a multi-step task or accepted plan, check the full outcome list before
-  voluntary closeout. Use `tpl session-checkpoint --task-manifest PATH --handoff-check`
-  when installed;
-  otherwise use the linked policy's manual checklist. Continue authorized work
+  voluntary closeout. Use the installed deck's completion/handoff check when
+  available; otherwise use the linked policy's manual checklist. Continue authorized work
   behind scoped blockers and investigate unknown inputs before asking the user.
 - Before promising a live run, identify its exact approvals and their current
   evidence. Prepare the reviewable decision first. A plan does not itself grant
@@ -138,6 +137,9 @@ integration, and promotion restrictions remain authoritative within the task.
   missing input or rule, attempted versus proposed alternatives, owner, next
   action, and completion proof. Do not invent approvals or retry uncertain
   mutations. Higher-priority instructions and native rules win over a skill.
+- Reuse unchanged evidence. Add or repeat a check only for a native gate,
+  changed behavior, or a named uncertainty; do not add generic stopping points.
+
 
 <!-- tpl:quality-review-v1 -->
 
